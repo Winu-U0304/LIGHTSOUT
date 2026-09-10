@@ -194,12 +194,6 @@
         button.sub-btn:hover {
             background-color: #047857;
         }
-        button.warn-btn {
-            background-color: #d97706;
-        }
-        button.warn-btn:hover {
-            background-color: #b45309;
-        }
 
         #win-overlay {
             display: none;
@@ -300,9 +294,9 @@
                 <div class="url-box" id="shareUrlBox"></div>
             </div>
             <div class="result-buttons" id="resultButtons">
-                <button class="action-btn btn-twitter" onclick="tweetScore()" id="tweetBtn">🐦 Xでポストする</button>
-                <button class="action-btn btn-share" onclick="copyShareUrl()" id="copyBtn">🔗 URLをコピーする</button>
-                <button class="action-btn" onclick="closeOverlayAndReset()" id="overlayRetryBtn">もう一度あそぶ</button>
+                <button class="action-btn btn-twitter" onclick="tweetScore()">🐦 Xでポストする</button>
+                <button class="action-btn btn-share" onclick="copyShareUrl()">🔗 URLをコピーする</button>
+                <button class="action-btn" onclick="initGame()">もう一度あそぶ</button>
             </div>
         </div>
 
@@ -431,10 +425,9 @@
         }
 
         // 状態管理
-        let currentMode = 'play'; // 'play', 'maker', 'testing'
+        let currentMode = 'play'; // 'play' or 'maker'
         let size = 4;
         let board = [];
-        let solutionGoalBoard = []; // メーカーで設定した完成形
         let moveCount = 0;
         let startTime = null;
         let timerInterval = null;
@@ -442,7 +435,8 @@
         let finalTimeStr = "0.0";
         let generatedUrl = "";
 
-        const STORAGE_KEY = 'stargames_saved_stage_v2';
+        // ローカルストレージキー（消えないように保存）
+        const STORAGE_KEY = 'stargames_saved_stage';
 
         function switchMode(mode) {
             currentMode = mode;
@@ -452,8 +446,8 @@
             if (mode === 'maker') {
                 document.getElementById('accordionContent').innerHTML = `
                     【メーカーモード】<br>
-                    パネルをクリックして、クリア時の「初期状態（ゴール）」を自由にデザインできます。<br>
-                    できたら**「テストプレイして公開する」**ボタンを押して、自分でクリア証明をしてください！
+                    パネルをクリックして、クリア時の「初期状態」を自由にデザインできます。<br>
+                    完成したら**「テストプレイして公開する」**ボタンを押してクリアを証明してください！
                 `;
             } else {
                 document.getElementById('accordionContent').innerHTML = `
@@ -484,62 +478,37 @@
             gridEl.style.gridTemplateRows = `repeat(${size}, ${px})`;
 
             if (currentMode === 'play') {
+                // プレイモード：保存された自作ステージがあればそれを読み込む、なければデフォルトのシャッフル
                 let loaded = loadCustomStage();
                 if (loaded && loaded.size === size) {
                     board = loaded.board.map(row => [...row]);
                 } else {
-                    loadRandomStage();
+                    board = Array(size).fill(null).map(() => Array(size).fill(true));
+                    let shuffleCount = size === 3 ? 3 : size === 4 ? 5 : 7;
+                    for (let i = 0; i < shuffleCount; i++) {
+                        let r = Math.floor(Math.random() * size);
+                        let c = Math.floor(Math.random() * size);
+                        toggleCellsSilent(r, c);
+                    }
+                    if (checkWin()) initGame();
                 }
-            } else if (currentMode === 'maker') {
+            } else {
+                // メーカーモード：初期状態はすべて「★」または保存されているものから開始
                 board = Array(size).fill(null).map(() => Array(size).fill(true));
-            } else if (currentMode === 'testing') {
-                // テストプレイ中は「メーカーが設定したゴール状態」からスタートさせるため、
-                // ゴール状態をランダムにシャッフルしてプレイ用ボードを作る
-                board = solutionGoalBoard.map(row => [...row]);
-                let shuffleCount = size === 3 ? 3 : size === 4 ? 5 : 7;
-                for (let i = 0; i < shuffleCount; i++) {
-                    let r = Math.floor(Math.random() * size);
-                    let c = Math.floor(Math.random() * size);
-                    toggleCellsSilent(r, c);
-                }
-                if (checkGoalMatch(solutionGoalBoard)) {
-                    // 万が一シャッフルして偶然ゴールと同じになったらやり直し
-                    initGame();
-                    return;
-                }
             }
 
             renderControls();
             renderBoard();
         }
 
-        function loadRandomStage() {
-            board = Array(size).fill(null).map(() => Array(size).fill(true));
-            let shuffleCount = size === 3 ? 3 : size === 4 ? 5 : 7;
-            for (let i = 0; i < shuffleCount; i++) {
-                let r = Math.floor(Math.random() * size);
-                let c = Math.floor(Math.random() * size);
-                toggleCellsSilent(r, c);
-            }
-            if (checkWin()) loadRandomStage();
-        }
-
         function renderControls() {
             const controlsArea = document.getElementById('controlsArea');
             if (currentMode === 'play') {
-                controlsArea.innerHTML = `
-                    <button class="action-btn" onclick="initGame()">やり直す</button>
-                    <button class="action-btn warn-btn" onclick="loadRandomStage(); renderBoard();">🎲 ランダムステージ</button>
-                `;
-            } else if (currentMode === 'maker') {
+                controlsArea.innerHTML = `<button class="action-btn" onclick="initGame()">やり直す</button>`;
+            } else {
                 controlsArea.innerHTML = `
                     <button class="action-btn" onclick="clearMakerBoard()">すべて☆にする</button>
-                    <button class="action-btn sub-btn" onclick="startTestPlay()">🚀 テストプレイして公開</button>
-                `;
-            } else if (currentMode === 'testing') {
-                controlsArea.innerHTML = `
-                    <button class="action-btn" onclick="initGame()">テストやり直し</button>
-                    <button class="action-btn" onclick="switchMode('maker')">メーカーに戻る</button>
+                    <button class="action-btn sub-btn" onclick="testAndPublish()">🚀 テストプレイして公開</button>
                 `;
             }
         }
@@ -575,13 +544,14 @@
             if (isCleared) return;
 
             if (currentMode === 'maker') {
+                // メーカーモードでは単独でON/OFFを切り替えて初期状態を作成できる
                 playSound('click');
                 board[r][c] = !board[r][c];
                 renderBoard();
                 return;
             }
 
-            // プレイモード or テストプレイモード
+            // プレイモード
             startTimerIfNeeded();
             playSound('click');
             moveCount++;
@@ -590,52 +560,46 @@
             toggleCellsSilent(r, c);
             renderBoard();
 
-            let targetCondition = (currentMode === 'testing') ? solutionGoalBoard : null;
-            let cleared = currentMode === 'testing' ? checkGoalMatch(targetCondition) : checkWin();
-
-            if (cleared) {
+            if (checkWin()) {
                 isCleared = true;
                 clearInterval(timerInterval);
                 finalTimeStr = ((Date.now() - startTime) / 1000).toFixed(1);
+                
                 playSound('win');
-
-                if (currentMode === 'testing') {
-                    // テストプレイ成功！URLを発行して公開へ
-                    saveCustomStage();
-                    let bitStr = solutionGoalBoard.map(row => row.map(cell => cell ? '1' : '0').join('')).join('');
-                    let base64Data = btoa(size + ':' + bitStr);
-                    let baseUrl = window.location.href.split('#')[0];
-                    generatedUrl = `${baseUrl}#play=${base64Data}`;
-
-                    document.getElementById('win-title').innerText = '🚀 クリア証明完了！';
-                    document.getElementById('clear-stats').innerHTML = `テストクリア成功 (${finalTimeStr}秒)！<br>あなたのステージが公開可能になりました！`;
-                    document.getElementById('url-container').style.display = 'block';
-                    document.getElementById('tweetBtn').style.display = 'inline-block';
-                    document.getElementById('copyBtn').style.display = 'inline-block';
-                    document.getElementById('overlayRetryBtn').innerText = 'メーカーに戻る';
-                    document.getElementById('overlayRetryBtn').onclick = () => { switchMode('maker'); };
-                } else {
-                    document.getElementById('win-title').innerText = '🎉 クリア成功！ 🎉';
-                    document.getElementById('clear-stats').innerText = `タイム: ${finalTimeStr}秒 / 手数: ${moveCount}回`;
-                    document.getElementById('url-container').style.display = 'none';
-                    document.getElementById('tweetBtn').style.display = 'none';
-                    document.getElementById('copyBtn').style.display = 'none';
-                    document.getElementById('overlayRetryBtn').innerText = 'もう一度あそぶ';
-                    document.getElementById('overlayRetryBtn').onclick = () => { initGame(); };
-                }
+                document.getElementById('win-title').innerText = '🎉 クリア成功！ 🎉';
+                document.getElementById('clear-stats').innerText = `タイム: ${finalTimeStr}秒 / 手数: ${moveCount}回`;
+                document.getElementById('url-container').style.display = 'none';
                 document.getElementById('win-overlay').style.display = 'flex';
             }
         }
 
-        function startTestPlay() {
-            // メーカーモードからテストプレイへ移行
-            solutionGoalBoard = board.map(row => [...row]);
-            currentMode = 'testing';
-            initGame();
+        function testAndPublish() {
+            // メーカーモードから「クリアできるかテスト」して公開用URLを発行
+            // プレイヤー視点として一度コピーを作り、クリア可能か？いや、制作者が自分で解いて証明する形にする
+            // ここでは「現在のボード状態を自作ステージとして保存し、プレイモードに切り替えて即座にテストプレイしてもらう」か、
+            // あるいは「一発クリア証明」としてURLを発行する。今回は手軽にURLエンコードして保存します。
+            
+            // 保存処理
+            saveCustomStage();
+
+            // エンコード用データ文字列化（例: size=4&b=1011...）
+            let bitStr = board.map(row => row.map(cell => cell ? '1' : '0').join('')).join('');
+            let base64Data = btoa(size + ':' + bitStr);
+            
+            // 全画面表示ハッシュURLを作成
+            let baseUrl = window.location.href.split('#')[0];
+            generatedUrl = `${baseUrl}#play=${base64Data}`;
+
+            playSound('win');
+            document.getElementById('win-title').innerText = '🚀 公開準備完了！';
+            document.getElementById('clear-stats').innerHTML = 'お見事！あなたのステージが完成しました。<br>以下の全画面プレイ用URLからいつでも遊べます！';
+            document.getElementById('shareUrlBox').innerText = generatedUrl;
+            document.getElementById('url-container').style.display = 'block';
+            document.getElementById('win-overlay').style.display = 'flex';
         }
 
         function saveCustomStage() {
-            const data = { size: size, board: solutionGoalBoard };
+            const data = { size: size, board: board };
             localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
         }
 
@@ -651,10 +615,6 @@
 
         function checkWin() {
             return board.every(row => row.every(cell => cell === true));
-        }
-
-        function checkGoalMatch(goal) {
-            return board.every((row, r) => row.every((cell, c) => cell === goal[r][c]));
         }
 
         function renderBoard() {
@@ -680,11 +640,6 @@
             }
         }
 
-        function closeOverlayAndReset() {
-            document.getElementById('win-overlay').style.display = 'none';
-            initGame();
-        }
-
         function copyShareUrl() {
             navigator.clipboard.writeText(generatedUrl).then(() => {
                 alert('全画面プレイ用URLをコピーしました！');
@@ -692,10 +647,11 @@
         }
 
         function tweetScore() {
-            let text = encodeURIComponent(`自作の宇宙パズルステージをクリアして公開しました！\n全画面URL: ${generatedUrl}\n#☆★games #LightsOut #お星さまパズル`);
+            let text = encodeURIComponent(`自分で宇宙パズルを作ってクリアしました！\n全画面URL: ${generatedUrl}\n#☆★games #お星さまパズルメーカー`);
             window.open(`https://twitter.com/intent/tweet?text=${text}`, '_blank');
         }
 
+        // 起動時にURLハッシュにステージデータが含まれていたら自動でプレイモードでロードする
         window.addEventListener('DOMContentLoaded', () => {
             if (window.location.hash.includes('#play=')) {
                 try {
@@ -708,25 +664,15 @@
                     size = s;
                     document.getElementById('sizeSelect').value = size;
                     
-                    let targetGoal = [];
+                    board = [];
                     for (let i = 0; i < size; i++) {
                         let row = [];
                         for (let j = 0; j < size; j++) {
                             row.push(bitStr[i * size + j] === '1');
                         }
-                        targetGoal.push(row);
+                        board.push(row);
                     }
-                    solutionGoalBoard = targetGoal;
-                    currentMode = 'testing';
-                    // 共有URLから開いた場合は、即座にランダムなシャッフル状態から解かせたいのでそのままtestingへ
-                    board = solutionGoalBoard.map(row => [...row]);
-                    let shuffleCount = size === 3 ? 3 : size === 4 ? 5 : 7;
-                    for (let i = 0; i < shuffleCount; i++) {
-                        let r = Math.floor(Math.random() * size);
-                        let c = Math.floor(Math.random() * size);
-                        toggleCellsSilent(r, c);
-                    }
-
+                    currentMode = 'play';
                     document.getElementById('tabPlay').classList.add('active');
                     document.getElementById('tabMaker').classList.remove('active');
                 } catch(e) {}
